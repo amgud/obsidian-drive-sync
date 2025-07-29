@@ -7,6 +7,8 @@ interface ObsidianDriveSettings {
 	refreshToken: string;
 	syncInterval: number;
 	autoSync: boolean;
+	storageLocation: 'appDataFolder' | 'visible';
+	visibleFolderName: string;
 }
 
 const DEFAULT_SETTINGS: ObsidianDriveSettings = {
@@ -14,7 +16,9 @@ const DEFAULT_SETTINGS: ObsidianDriveSettings = {
 	googleDriveClientSecret: '',
 	refreshToken: '',
 	syncInterval: 300000, // 5 minutes
-	autoSync: false
+	autoSync: false,
+	storageLocation: 'appDataFolder',
+	visibleFolderName: 'Obsidian Vault'
 };
 
 export default class ObsidianDrivePlugin extends Plugin {
@@ -22,6 +26,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 	drive: any;
 	oauth2Client: any;
 	syncInterval: NodeJS.Timer | null = null;
+	visibleFolderId: string | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -130,14 +135,19 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 		try {
 			new Notice('Starting vault sync...');
-			
+
+			// Ensure visible folder exists if using visible storage
+			if (this.settings.storageLocation === 'visible') {
+				await this.ensureVisibleFolderExists();
+			}
+
 			// Get all files in the vault
 			const files = this.app.vault.getFiles();
-			
+
 			for (const file of files) {
 				await this.syncFile(file);
 			}
-			
+
 			new Notice('Vault sync completed!');
 		} catch (error) {
 			console.error('Sync error:', error);
@@ -151,10 +161,16 @@ export default class ObsidianDrivePlugin extends Plugin {
 			const fileName = file.path;
 
 			// Check if file exists on Google Drive
-			const response = await this.drive.files.list({
-				q: `name='${fileName}' and parents in 'appDataFolder'`,
-				spaces: 'appDataFolder'
-			});
+			const listOptions: any = {
+				q: this.getSearchQuery(fileName)
+			};
+			
+			const searchSpace = this.getSearchSpace();
+			if (searchSpace) {
+				listOptions.spaces = searchSpace;
+			}
+
+			const response = await this.drive.files.list(listOptions);
 
 			if (response.data.files && response.data.files.length > 0) {
 				// Update existing file
@@ -171,7 +187,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 				await this.drive.files.create({
 					requestBody: {
 						name: fileName,
-						parents: ['appDataFolder']
+						parents: this.getParentId()
 					},
 					media: {
 						mimeType: 'text/plain',
@@ -199,6 +215,56 @@ export default class ObsidianDrivePlugin extends Plugin {
 			clearInterval(this.syncInterval);
 			this.syncInterval = null;
 		}
+	}
+
+	async ensureVisibleFolderExists(): Promise<void> {
+		if (this.visibleFolderId) {
+			return;
+		}
+
+		try {
+			// Check if folder already exists
+			const response = await this.drive.files.list({
+				q: `name='${this.settings.visibleFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+			});
+
+			if (response.data.files && response.data.files.length > 0) {
+				this.visibleFolderId = response.data.files[0].id;
+			} else {
+				// Create the folder
+				const folderResponse = await this.drive.files.create({
+					requestBody: {
+						name: this.settings.visibleFolderName,
+						mimeType: 'application/vnd.google-apps.folder'
+					}
+				});
+				this.visibleFolderId = folderResponse.data.id;
+			}
+		} catch (error) {
+			console.error('Error ensuring visible folder exists:', error);
+			throw error;
+		}
+	}
+
+	getParentId(): string[] {
+		if (this.settings.storageLocation === 'visible' && this.visibleFolderId) {
+			return [this.visibleFolderId];
+		}
+		return ['appDataFolder'];
+	}
+
+	getSearchQuery(fileName: string): string {
+		if (this.settings.storageLocation === 'visible' && this.visibleFolderId) {
+			return `name='${fileName}' and parents in '${this.visibleFolderId}'`;
+		}
+		return `name='${fileName}' and parents in 'appDataFolder'`;
+	}
+
+	getSearchSpace(): string | undefined {
+		if (this.settings.storageLocation === 'visible') {
+			return undefined;
+		}
+		return 'appDataFolder';
 	}
 }
 
@@ -261,6 +327,33 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
+			.setName('Storage Location')
+			.setDesc('Choose where to store files in Google Drive')
+			.addDropdown(dropdown => dropdown
+				.addOption('appDataFolder', 'Hidden (App Data Folder)')
+				.addOption('visible', 'Visible (Custom Folder)')
+				.setValue(this.plugin.settings.storageLocation)
+				.onChange(async (value: 'appDataFolder' | 'visible') => {
+					this.plugin.settings.storageLocation = value;
+					await this.plugin.saveSettings();
+					// Reset folder ID when switching storage types
+					this.plugin.visibleFolderId = null;
+				}));
+
+		new Setting(containerEl)
+			.setName('Visible Folder Name')
+			.setDesc('Name of the folder in Google Drive (only used for visible storage)')
+			.addText(text => text
+				.setPlaceholder('Obsidian Vault')
+				.setValue(this.plugin.settings.visibleFolderName)
+				.onChange(async (value) => {
+					this.plugin.settings.visibleFolderName = value || 'Obsidian Vault';
+					await this.plugin.saveSettings();
+					// Reset folder ID when changing folder name
+					this.plugin.visibleFolderId = null;
+				}));
+
+		new Setting(containerEl)
 			.setName('Auto Sync')
 			.setDesc('Automatically sync vault at regular intervals')
 			.addToggle(toggle => toggle
@@ -268,7 +361,7 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.autoSync = value;
 					await this.plugin.saveSettings();
-					
+
 					if (value) {
 						this.plugin.startAutoSync();
 					} else {
@@ -286,7 +379,7 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.syncInterval = value * 60000;
 					await this.plugin.saveSettings();
-					
+
 					if (this.plugin.settings.autoSync) {
 						this.plugin.startAutoSync();
 					}
