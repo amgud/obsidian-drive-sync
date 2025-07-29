@@ -7,7 +7,8 @@ Keep your Obsidian vault synchronized with Google Drive automatically! ☁️ Th
 - ⚡ **Sync on Save**: Automatically sync files the moment they're saved (NEW!)
 - 🔄 **Automatic Sync**: Set up automatic syncing at regular intervals
 - 🔒 **Two Storage Options**: Choose between hidden app-specific storage or visible Google Drive folder
-- 🚀 **One-Click Sync**: Manual sync with ribbon icon or command palette
+- 🚀 **Manual Sync**: Optional ribbon icon and command palette sync (can be disabled)
+- 🎛️ **Flexible Sync Options**: Mix and match sync methods to fit your workflow
 - 📱 **Cross-Platform**: Works on desktop and mobile Obsidian apps
 - 🔐 **Secure Authentication**: Uses OAuth2 for secure Google Drive access
 
@@ -109,6 +110,11 @@ Before using the plugin, you need to set up Google Drive API access:
 - 📂 Default: "Obsidian Vault"
 - ✏️ Change this to customize your folder name
 
+**🚀 Manual Sync:**
+- 👆 Toggle to enable/disable ribbon button and command
+- ☁️ On-demand syncing when you need it
+- 🔄 Restart Obsidian required when changing this setting
+
 **⚡ Sync on Save:**
 - 💾 Toggle to sync files instantly when saved
 - 🚀 Most responsive option - syncs immediately after Ctrl/Cmd+S
@@ -120,19 +126,28 @@ Before using the plugin, you need to set up Google Drive API access:
 
 ## 🎯 Usage
 
+You can enable any combination of these sync methods to fit your workflow:
+
+### 🚀 Manual Sync
+- ☁️ Click the cloud icon in the ribbon (left sidebar)
+- 🎨 Or use Command Palette: "Sync vault with Google Drive"
+- 🎛️ Can be disabled in settings to clean up UI if not needed
+
 ### ⚡ Sync on Save (Recommended)
 - 💾 Enable "Sync on Save" in settings for instant backup
 - 🚀 Files sync automatically every time you save (Ctrl/Cmd+S)
 - 🎯 Most efficient - only syncs the file you just modified
 
-### 👆 Manual Sync
-- ☁️ Click the cloud icon in the ribbon (left sidebar)
-- 🎨 Or use Command Palette: "Sync vault with Google Drive"
-
 ### 🤖 Automatic Sync
 - ⚡ Enable "Auto Sync" in settings
 - ⏰ Choose sync interval (default: 5 minutes)
 - 🔄 Plugin will sync automatically in the background
+
+### 🎛️ Mix and Match
+- ✅ Use all three methods together for maximum coverage
+- ✅ Use only "Sync on Save" for minimal, responsive syncing
+- ✅ Use "Auto Sync" + "Manual Sync" for traditional workflow
+- ✅ Disable "Manual Sync" if you prefer fully automated syncing
 
 ### 🔐 Authentication Issues
 - 🔄 Use Command Palette: "Authenticate Google Drive" to re-authenticate

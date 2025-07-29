@@ -8,6 +8,7 @@ interface ObsidianDriveSettings {
 	syncInterval: number;
 	autoSync: boolean;
 	syncOnSave: boolean;
+	manualSync: boolean;
 	storageLocation: 'appDataFolder' | 'visible';
 	visibleFolderName: string;
 }
@@ -19,6 +20,7 @@ const DEFAULT_SETTINGS: ObsidianDriveSettings = {
 	syncInterval: 300000, // 5 minutes
 	autoSync: false,
 	syncOnSave: false,
+	manualSync: true,
 	storageLocation: 'appDataFolder',
 	visibleFolderName: 'Obsidian Vault'
 };
@@ -36,19 +38,20 @@ export default class ObsidianDrivePlugin extends Plugin {
 		// Initialize Google Drive API
 		this.initializeGoogleDrive();
 
-		// Add ribbon icon
-		this.addRibbonIcon('cloud', 'Sync with Google Drive', async () => {
-			await this.syncVault();
-		});
-
-		// Add commands
-		this.addCommand({
-			id: 'sync-vault',
-			name: 'Sync vault with Google Drive',
-			callback: async () => {
+		// Add ribbon icon and command if manual sync is enabled
+		if (this.settings.manualSync) {
+			this.addRibbonIcon('cloud', 'Sync with Google Drive', async () => {
 				await this.syncVault();
-			}
-		});
+			});
+
+			this.addCommand({
+				id: 'sync-vault',
+				name: 'Sync vault with Google Drive',
+				callback: async () => {
+					await this.syncVault();
+				}
+			});
+		}
 
 		this.addCommand({
 			id: 'authenticate-drive',
@@ -365,6 +368,19 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					// Reset folder ID when changing folder name
 					this.plugin.visibleFolderId = null;
+				}));
+
+		new Setting(containerEl)
+			.setName('Manual Sync')
+			.setDesc('Enable manual sync button and command')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.manualSync)
+				.onChange(async (value) => {
+					this.plugin.settings.manualSync = value;
+					await this.plugin.saveSettings();
+					
+					// Restart plugin to register/unregister ribbon button and command
+					new Notice('Please restart Obsidian to apply manual sync setting.');
 				}));
 
 		new Setting(containerEl)
