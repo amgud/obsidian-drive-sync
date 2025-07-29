@@ -177,6 +177,11 @@ export default class ObsidianDrivePlugin extends Plugin {
 			const content = await this.app.vault.read(file);
 			const fileName = file.path;
 
+			// Ensure visible folder exists if using visible storage
+			if (this.settings.storageLocation === 'visible') {
+				await this.ensureVisibleFolderExists();
+			}
+
 			// Check if file exists on Google Drive
 			const listOptions: any = {
 				q: this.getSearchQuery(fileName)
