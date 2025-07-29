@@ -7,6 +7,7 @@ interface ObsidianDriveSettings {
 	refreshToken: string;
 	syncInterval: number;
 	autoSync: boolean;
+	syncOnSave: boolean;
 	storageLocation: 'appDataFolder' | 'visible';
 	visibleFolderName: string;
 }
@@ -17,6 +18,7 @@ const DEFAULT_SETTINGS: ObsidianDriveSettings = {
 	refreshToken: '',
 	syncInterval: 300000, // 5 minutes
 	autoSync: false,
+	syncOnSave: false,
 	storageLocation: 'appDataFolder',
 	visibleFolderName: 'Obsidian Vault'
 };
@@ -58,6 +60,17 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 		// Add settings tab
 		this.addSettingTab(new ObsidianDriveSettingTab(this.app, this));
+
+		// Add file change listener for sync on save
+		if (this.settings.syncOnSave) {
+			this.registerEvent(
+				this.app.vault.on('modify', async (file) => {
+					if (file instanceof TFile && this.drive) {
+						await this.syncFile(file);
+					}
+				})
+			);
+		}
 
 		// Start auto-sync if enabled
 		if (this.settings.autoSync) {
@@ -352,6 +365,19 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					// Reset folder ID when changing folder name
 					this.plugin.visibleFolderId = null;
+				}));
+
+		new Setting(containerEl)
+			.setName('Sync on Save')
+			.setDesc('Automatically sync files when they are saved')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.syncOnSave)
+				.onChange(async (value) => {
+					this.plugin.settings.syncOnSave = value;
+					await this.plugin.saveSettings();
+					
+					// Restart plugin to register/unregister event listener
+					new Notice('Please restart Obsidian to apply sync on save setting.');
 				}));
 
 		new Setting(containerEl)

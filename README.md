@@ -4,6 +4,7 @@ Keep your Obsidian vault synchronized with Google Drive automatically! ☁️ Th
 
 ## ✨ Features
 
+- ⚡ **Sync on Save**: Automatically sync files the moment they're saved (NEW!)
 - 🔄 **Automatic Sync**: Set up automatic syncing at regular intervals
 - 🔒 **Two Storage Options**: Choose between hidden app-specific storage or visible Google Drive folder
 - 🚀 **One-Click Sync**: Manual sync with ribbon icon or command palette
@@ -108,11 +109,21 @@ Before using the plugin, you need to set up Google Drive API access:
 - 📂 Default: "Obsidian Vault"
 - ✏️ Change this to customize your folder name
 
+**⚡ Sync on Save:**
+- 💾 Toggle to sync files instantly when saved
+- 🚀 Most responsive option - syncs immediately after Ctrl/Cmd+S
+- 🔄 Restart Obsidian required when changing this setting
+
 **⏰ Auto Sync:**
 - 🔄 Toggle automatic syncing on/off
 - ⏱️ Set sync interval (1-60 minutes)
 
 ## 🎯 Usage
+
+### ⚡ Sync on Save (Recommended)
+- 💾 Enable "Sync on Save" in settings for instant backup
+- 🚀 Files sync automatically every time you save (Ctrl/Cmd+S)
+- 🎯 Most efficient - only syncs the file you just modified
 
 ### 👆 Manual Sync
 - ☁️ Click the cloud icon in the ribbon (left sidebar)
