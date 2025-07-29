@@ -281,7 +281,7 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl('h2', { text: 'Obsidian Drive Settings' });
+		containerEl.createEl('h2', { text: 'Obsidian Drive Sync Settings' });
 
 		new Setting(containerEl)
 			.setName('Google Drive Client ID')

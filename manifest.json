@@ -1,6 +1,6 @@
 {
-  "id": "obsidian-drive",
-  "name": "Obsidian Drive",
+  "id": "obsidian-drive-sync",
+  "name": "Obsidian Drive Sync",
   "version": "1.0.0",
   "minAppVersion": "0.15.0",
   "description": "Sync your Obsidian vault with Google Drive",
