@@ -110,8 +110,9 @@ export default class ObsidianDrivePlugin extends Plugin {
 			scope: ['https://www.googleapis.com/auth/drive.file']
 		});
 
-		new Notice('Please visit the URL shown in the console and enter the authorization code in settings.');
-		console.log('Visit this URL to authorize the application:', authUrl);
+		// Copy URL to clipboard and show notice
+		await navigator.clipboard.writeText(authUrl);
+		new Notice('Authentication URL copied to clipboard! Paste it in your browser to authorize.', 8000);
 	}
 
 	async setAuthCode(code: string): Promise<void> {
