@@ -328,7 +328,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 		try {
 			// Get all files from Google Drive
 			const queryParams = new URLSearchParams();
-			
+
 			if (this.settings.storageLocation === 'visible' && this.visibleFolderId) {
 				queryParams.set('q', `parents in '${this.visibleFolderId}' and mimeType != 'application/vnd.google-apps.folder' and trashed=false`);
 			} else {
@@ -337,19 +337,18 @@ export default class ObsidianDrivePlugin extends Plugin {
 			}
 
 			const response = await this.getDriveFile(`files?${queryParams}`);
-			
+
 			let processedCount = 0;
 			if (response.files && response.files.length > 0) {
 				for (const driveFile of response.files) {
 					const fileName = driveFile.name;
-					
-					// Always download/update the file to ensure it's up to date
-					// The downloadFile method will handle whether to create or update
+
+					// Download/update all files from Google Drive
 					await this.downloadFile(driveFile.id, fileName);
 					processedCount++;
 				}
 			}
-			
+
 			if (processedCount > 0) {
 				new Notice(`Processed ${processedCount} file(s) from Google Drive`);
 			}
@@ -373,11 +372,11 @@ export default class ObsidianDrivePlugin extends Plugin {
 			}
 
 			const content = await response.text();
-			
+
 			// Check if file already exists
 			const existingFile = this.app.vault.getAbstractFileByPath(fileName);
 			let targetFile: TFile;
-			
+
 			if (existingFile && existingFile instanceof TFile) {
 				// Update existing file
 				await this.app.vault.modify(existingFile, content);
@@ -390,7 +389,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 				console.log(`Downloaded new file: ${fileName}`);
 				new Notice(`Downloaded: ${fileName}`, 3000);
 			}
-			
+
 			// Try to refresh the vault to ensure file appears in UI
 			if (this.app.workspace) {
 				this.app.workspace.trigger('file-menu', targetFile);
@@ -480,7 +479,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 			if (oldFileResponse.files && oldFileResponse.files.length > 0) {
 				const fileId = oldFileResponse.files[0].id;
-				
+
 				// Update the file name on Google Drive
 				await this.driveApiRequest(`files/${fileId}`, {
 					method: 'PATCH',
@@ -526,12 +525,12 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 			if (response.files && response.files.length > 0) {
 				const fileId = response.files[0].id;
-				
+
 				// Delete the file from Google Drive
 				await this.driveApiRequest(`files/${fileId}`, {
 					method: 'DELETE'
 				});
-				
+
 				console.log(`Deleted file ${file.path} from Google Drive`);
 			} else {
 				console.log(`File ${file.path} not found on Google Drive, nothing to delete`);
