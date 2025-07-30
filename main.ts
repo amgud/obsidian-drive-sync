@@ -80,6 +80,15 @@ export default class ObsidianDrivePlugin extends Plugin {
 					}
 				})
 			);
+
+			// Handle file deletions
+			this.registerEvent(
+				this.app.vault.on('delete', async (file) => {
+					if (file instanceof TFile && this.accessToken) {
+						await this.handleFileDelete(file);
+					}
+				})
+			);
 		}
 
 		// Start auto-sync if enabled
@@ -409,6 +418,40 @@ export default class ObsidianDrivePlugin extends Plugin {
 			}
 		} catch (error) {
 			console.error(`Error handling file rename from ${oldPath} to ${file.path}:`, error);
+		}
+	}
+
+	async handleFileDelete(file: TFile): Promise<void> {
+		try {
+			// Ensure visible folder exists if using visible storage
+			if (this.settings.storageLocation === 'visible') {
+				await this.ensureVisibleFolderExists();
+			}
+
+			// Find the file on Google Drive
+			const queryParams = new URLSearchParams({
+				q: this.getSearchQuery(file.path)
+			});
+			const searchSpace = this.getSearchSpace();
+			if (searchSpace) {
+				queryParams.append('spaces', searchSpace);
+			}
+			const response = await this.getDriveFile(`files?${queryParams}`);
+
+			if (response.files && response.files.length > 0) {
+				const fileId = response.files[0].id;
+				
+				// Delete the file from Google Drive
+				await this.driveApiRequest(`files/${fileId}`, {
+					method: 'DELETE'
+				});
+				
+				console.log(`Deleted file ${file.path} from Google Drive`);
+			} else {
+				console.log(`File ${file.path} not found on Google Drive, nothing to delete`);
+			}
+		} catch (error) {
+			console.error(`Error deleting file ${file.path} from Google Drive:`, error);
 		}
 	}
 
