@@ -8,6 +8,7 @@ interface ObsidianDriveSettings {
 	autoSync: boolean;
 	syncOnSave: boolean;
 	manualSync: boolean;
+	syncOnStartup: boolean;
 	storageLocation: 'appDataFolder' | 'visible';
 	visibleFolderName: string;
 }
@@ -20,6 +21,7 @@ const DEFAULT_SETTINGS: ObsidianDriveSettings = {
 	autoSync: false,
 	syncOnSave: false,
 	manualSync: true,
+	syncOnStartup: true,
 	storageLocation: 'appDataFolder',
 	visibleFolderName: 'Obsidian Vault'
 };
@@ -94,6 +96,11 @@ export default class ObsidianDrivePlugin extends Plugin {
 		// Start auto-sync if enabled
 		if (this.settings.autoSync) {
 			this.startAutoSync();
+		}
+
+		// Sync on startup if enabled
+		if (this.settings.syncOnStartup && this.accessToken) {
+			await this.syncVault();
 		}
 	}
 
@@ -706,6 +713,16 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 					} else {
 						this.plugin.stopAutoSync();
 					}
+				}));
+
+		new Setting(containerEl)
+			.setName('Sync on Startup')
+			.setDesc('Automatically sync vault when Obsidian starts')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.syncOnStartup)
+				.onChange(async (value) => {
+					this.plugin.settings.syncOnStartup = value;
+					await this.plugin.saveSettings();
 				}));
 
 		new Setting(containerEl)
