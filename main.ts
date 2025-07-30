@@ -71,6 +71,15 @@ export default class ObsidianDrivePlugin extends Plugin {
 					}
 				})
 			);
+
+			// Handle file renames
+			this.registerEvent(
+				this.app.vault.on('rename', async (file, oldPath) => {
+					if (file instanceof TFile && this.accessToken) {
+						await this.handleFileRename(file, oldPath);
+					}
+				})
+			);
 		}
 
 		// Start auto-sync if enabled
@@ -208,28 +217,62 @@ export default class ObsidianDrivePlugin extends Plugin {
 		return response.json();
 	}
 
-	async driveApiRequest(fileId: string, options: RequestInit = {}): Promise<any> {
+	async driveApiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
 		if (!this.accessToken) {
 			await this.refreshAccessToken();
 		}
 
-		const response = await fetch(`https://www.googleapis.com/upload/drive/v3/${fileId}`, {
+		const headers: Record<string, string> = {
+			'Authorization': `Bearer ${this.accessToken}`,
+			...(options.headers as Record<string, string> || {})
+		};
+
+		// Only set Content-Type to application/json if not already specified
+		if (!headers['Content-Type']) {
+			headers['Content-Type'] = 'application/json';
+		}
+
+		const response = await fetch(`https://www.googleapis.com/drive/v3/${endpoint}`, {
 			...options,
-			headers: {
-				'Authorization': `Bearer ${this.accessToken}`,
-				'Content-Type': 'application/json',
-				...options.headers
-			}
+			headers
 		});
 
 		if (response.status === 401) {
 			// Token expired, refresh and retry
 			await this.refreshAccessToken();
-			return this.driveApiRequest(fileId, options);
+			return this.driveApiRequest(endpoint, options);
 		}
 
 		if (!response.ok) {
 			throw new Error(`Drive API error: ${response.status}`);
+		}
+
+		return response.json();
+	}
+
+	async driveUploadRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
+		if (!this.accessToken) {
+			await this.refreshAccessToken();
+		}
+
+		const headers: Record<string, string> = {
+			'Authorization': `Bearer ${this.accessToken}`,
+			...(options.headers as Record<string, string> || {})
+		};
+
+		const response = await fetch(`https://www.googleapis.com/upload/drive/v3/${endpoint}`, {
+			...options,
+			headers
+		});
+
+		if (response.status === 401) {
+			// Token expired, refresh and retry
+			await this.refreshAccessToken();
+			return this.driveUploadRequest(endpoint, options);
+		}
+
+		if (!response.ok) {
+			throw new Error(`Drive Upload API error: ${response.status}`);
 		}
 
 		return response.json();
@@ -294,7 +337,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 			if (response.files && response.files.length > 0) {
 				// Update existing file
 				const fileId = response.files[0].id;
-				await this.driveApiRequest(`files/${fileId}`, {
+				await this.driveUploadRequest(`files/${fileId}?uploadType=media`, {
 					method: 'PATCH',
 					headers: {
 						'Content-Type': 'text/plain'
@@ -312,7 +355,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 				form.append('metadata', new Blob([JSON.stringify(metadata)], {type: 'application/json'}));
 				form.append('file', new Blob([content], {type: 'text/plain'}));
 
-				await this.driveApiRequest('files?uploadType=multipart', {
+				await this.driveUploadRequest('files?uploadType=multipart', {
 					method: 'POST',
 					headers: {},
 					body: form
@@ -320,6 +363,52 @@ export default class ObsidianDrivePlugin extends Plugin {
 			}
 		} catch (error) {
 			console.error(`Error syncing file ${file.path}:`, error);
+		}
+	}
+
+	async handleFileRename(file: TFile, oldPath: string): Promise<void> {
+		try {
+			// Ensure visible folder exists if using visible storage
+			if (this.settings.storageLocation === 'visible') {
+				await this.ensureVisibleFolderExists();
+			}
+
+			// Find the old file on Google Drive
+			const oldQueryParams = new URLSearchParams({
+				q: this.getSearchQuery(oldPath)
+			});
+			const searchSpace = this.getSearchSpace();
+			if (searchSpace) {
+				oldQueryParams.append('spaces', searchSpace);
+			}
+			const oldFileResponse = await this.getDriveFile(`files?${oldQueryParams}`);
+
+			if (oldFileResponse.files && oldFileResponse.files.length > 0) {
+				const fileId = oldFileResponse.files[0].id;
+				
+				// Update the file name on Google Drive
+				await this.driveApiRequest(`files/${fileId}`, {
+					method: 'PATCH',
+					body: JSON.stringify({
+						name: file.path
+					})
+				});
+
+				// Also update the content in case it changed
+				const content = await this.app.vault.read(file);
+				await this.driveUploadRequest(`files/${fileId}?uploadType=media`, {
+					method: 'PATCH',
+					headers: {
+						'Content-Type': 'text/plain'
+					},
+					body: content
+				});
+			} else {
+				// Old file not found, treat as new file
+				await this.syncFile(file);
+			}
+		} catch (error) {
+			console.error(`Error handling file rename from ${oldPath} to ${file.path}:`, error);
 		}
 	}
 
