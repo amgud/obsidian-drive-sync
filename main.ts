@@ -338,23 +338,20 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 			const response = await this.getDriveFile(`files?${queryParams}`);
 			
-			let downloadedCount = 0;
+			let processedCount = 0;
 			if (response.files && response.files.length > 0) {
 				for (const driveFile of response.files) {
 					const fileName = driveFile.name;
 					
-					// Check if file exists locally
-					const existingFile = this.app.vault.getAbstractFileByPath(fileName);
-					if (!existingFile) {
-						// Download the file from Google Drive
-						await this.downloadFile(driveFile.id, fileName);
-						downloadedCount++;
-					}
+					// Always download/update the file to ensure it's up to date
+					// The downloadFile method will handle whether to create or update
+					await this.downloadFile(driveFile.id, fileName);
+					processedCount++;
 				}
 			}
 			
-			if (downloadedCount > 0) {
-				new Notice(`Downloaded ${downloadedCount} file(s) from Google Drive`);
+			if (processedCount > 0) {
+				new Notice(`Processed ${processedCount} file(s) from Google Drive`);
 			}
 		} catch (error) {
 			console.error('Error downloading missing files:', error);
@@ -377,16 +374,26 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 			const content = await response.text();
 			
-			// Create the file in Obsidian vault
-			const createdFile = await this.app.vault.create(fileName, content);
-			console.log(`Downloaded file: ${fileName}`);
+			// Check if file already exists
+			const existingFile = this.app.vault.getAbstractFileByPath(fileName);
+			let targetFile: TFile;
 			
-			// Show notification for the downloaded file
-			new Notice(`Downloaded: ${fileName}`, 3000);
+			if (existingFile && existingFile instanceof TFile) {
+				// Update existing file
+				await this.app.vault.modify(existingFile, content);
+				targetFile = existingFile;
+				console.log(`Updated existing file: ${fileName}`);
+				new Notice(`Updated: ${fileName}`, 3000);
+			} else {
+				// Create new file
+				targetFile = await this.app.vault.create(fileName, content);
+				console.log(`Downloaded new file: ${fileName}`);
+				new Notice(`Downloaded: ${fileName}`, 3000);
+			}
 			
 			// Try to refresh the vault to ensure file appears in UI
 			if (this.app.workspace) {
-				this.app.workspace.trigger('file-menu', createdFile);
+				this.app.workspace.trigger('file-menu', targetFile);
 			}
 		} catch (error) {
 			console.error(`Error downloading file ${fileName}:`, error);
