@@ -301,9 +301,11 @@ export default class ObsidianDrivePlugin extends Plugin {
 				await this.ensureVisibleFolderExists();
 			}
 
-			// Get all files in the vault
-			const files = this.app.vault.getFiles();
+			// First, download files from Google Drive that don't exist locally
+			await this.downloadMissingFiles();
 
+			// Then, upload/update local files to Google Drive
+			const files = this.app.vault.getFiles();
 			for (const file of files) {
 				await this.syncFile(file);
 			}
@@ -312,6 +314,60 @@ export default class ObsidianDrivePlugin extends Plugin {
 		} catch (error) {
 			console.error('Sync error:', error);
 			new Notice('Sync failed. Check console for details.');
+		}
+	}
+
+	async downloadMissingFiles(): Promise<void> {
+		try {
+			// Get all files from Google Drive
+			const queryParams = new URLSearchParams();
+			
+			if (this.settings.storageLocation === 'visible' && this.visibleFolderId) {
+				queryParams.set('q', `parents in '${this.visibleFolderId}' and mimeType != 'application/vnd.google-apps.folder' and trashed=false`);
+			} else {
+				queryParams.set('q', `parents in 'appDataFolder' and mimeType != 'application/vnd.google-apps.folder' and trashed=false`);
+				queryParams.set('spaces', 'appDataFolder');
+			}
+
+			const response = await this.getDriveFile(`files?${queryParams}`);
+
+			if (response.files && response.files.length > 0) {
+				for (const driveFile of response.files) {
+					const fileName = driveFile.name;
+					
+					// Check if file exists locally
+					const existingFile = this.app.vault.getAbstractFileByPath(fileName);
+					if (!existingFile) {
+						// Download the file from Google Drive
+						await this.downloadFile(driveFile.id, fileName);
+					}
+				}
+			}
+		} catch (error) {
+			console.error('Error downloading missing files:', error);
+		}
+	}
+
+	async downloadFile(fileId: string, fileName: string): Promise<void> {
+		try {
+			// Download file content from Google Drive
+			const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+				headers: {
+					'Authorization': `Bearer ${this.accessToken}`
+				}
+			});
+
+			if (!response.ok) {
+				throw new Error(`Failed to download file: ${response.status}`);
+			}
+
+			const content = await response.text();
+			
+			// Create the file in Obsidian vault
+			await this.app.vault.create(fileName, content);
+			console.log(`Downloaded file: ${fileName}`);
+		} catch (error) {
+			console.error(`Error downloading file ${fileName}:`, error);
 		}
 	}
 

@@ -59,3 +59,10 @@ The plugin uses the `googleapis` library with OAuth2 "out of band" flow:
 - `esbuild.config.mjs` - Build configuration with watch mode
 - `deploy.mjs` - Development deployment script
 - `build/main.js` - Built plugin output
+
+## Commit Message Guidelines
+
+- Use conventional commit format (feat:, fix:, refactor:, etc.)
+- Write commit messages as a single sentence without bullet points
+- Do NOT include co-authors or "Generated with Claude Code" text
+- Keep messages concise and descriptive
