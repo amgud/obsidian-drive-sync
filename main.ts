@@ -1,5 +1,4 @@
 import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TFolder } from 'obsidian';
-import { google } from 'googleapis';
 
 interface ObsidianDriveSettings {
 	googleDriveClientId: string;
@@ -27,16 +26,15 @@ const DEFAULT_SETTINGS: ObsidianDriveSettings = {
 
 export default class ObsidianDrivePlugin extends Plugin {
 	settings: ObsidianDriveSettings;
-	drive: any;
-	oauth2Client: any;
-	syncInterval: NodeJS.Timer | null = null;
+	accessToken: string | null = null;
+	syncInterval: number | null = null;
 	visibleFolderId: string | null = null;
 
 	async onload() {
 		await this.loadSettings();
 
 		// Initialize Google Drive API
-		this.initializeGoogleDrive();
+		await this.initializeGoogleDrive();
 
 		// Add ribbon icon and command if manual sync is enabled
 		if (this.settings.manualSync) {
@@ -68,7 +66,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 		if (this.settings.syncOnSave) {
 			this.registerEvent(
 				this.app.vault.on('modify', async (file) => {
-					if (file instanceof TFile && this.drive) {
+					if (file instanceof TFile && this.accessToken) {
 						await this.syncFile(file);
 					}
 				})
@@ -83,7 +81,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 	onunload() {
 		if (this.syncInterval) {
-			clearInterval(this.syncInterval);
+			window.clearInterval(this.syncInterval);
 		}
 	}
 
@@ -95,24 +93,16 @@ export default class ObsidianDrivePlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	initializeGoogleDrive() {
-		if (!this.settings.googleDriveClientId || !this.settings.googleDriveClientSecret) {
+	async initializeGoogleDrive() {
+		if (!this.settings.googleDriveClientId || !this.settings.googleDriveClientSecret || !this.settings.refreshToken) {
 			return;
 		}
 
-		this.oauth2Client = new google.auth.OAuth2(
-			this.settings.googleDriveClientId,
-			this.settings.googleDriveClientSecret,
-			'urn:ietf:wg:oauth:2.0:oob'
-		);
-
-		if (this.settings.refreshToken) {
-			this.oauth2Client.setCredentials({
-				refresh_token: this.settings.refreshToken
-			});
+		try {
+			await this.refreshAccessToken();
+		} catch (error) {
+			console.error('Failed to initialize Google Drive:', error);
 		}
-
-		this.drive = google.drive({ version: 'v3', auth: this.oauth2Client });
 	}
 
 	async authenticateGoogleDrive(): Promise<void> {
@@ -121,10 +111,12 @@ export default class ObsidianDrivePlugin extends Plugin {
 			return;
 		}
 
-		const authUrl = this.oauth2Client.generateAuthUrl({
-			access_type: 'offline',
-			scope: ['https://www.googleapis.com/auth/drive.file']
-		});
+		const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+			`client_id=${encodeURIComponent(this.settings.googleDriveClientId)}&` +
+			`redirect_uri=${encodeURIComponent('urn:ietf:wg:oauth:2.0:oob')}&` +
+			`response_type=code&` +
+			`scope=${encodeURIComponent('https://www.googleapis.com/auth/drive.file')}&` +
+			`access_type=offline`;
 
 		// Copy URL to clipboard and show notice
 		await navigator.clipboard.writeText(authUrl);
@@ -133,10 +125,29 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 	async setAuthCode(code: string): Promise<void> {
 		try {
-			const { tokens } = await this.oauth2Client.getToken(code);
+			const response = await fetch('https://oauth2.googleapis.com/token', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/x-www-form-urlencoded',
+				},
+				body: new URLSearchParams({
+					client_id: this.settings.googleDriveClientId,
+					client_secret: this.settings.googleDriveClientSecret,
+					code: code,
+					grant_type: 'authorization_code',
+					redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
+				})
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+
+			const tokens = await response.json();
 			this.settings.refreshToken = tokens.refresh_token;
+			this.accessToken = tokens.access_token;
 			await this.saveSettings();
-			this.initializeGoogleDrive();
+			await this.initializeGoogleDrive();
 			new Notice('Google Drive authentication successful!');
 		} catch (error) {
 			console.error('Error during authentication:', error);
@@ -144,8 +155,61 @@ export default class ObsidianDrivePlugin extends Plugin {
 		}
 	}
 
+	async refreshAccessToken(): Promise<void> {
+		if (!this.settings.refreshToken) {
+			throw new Error('No refresh token available');
+		}
+
+		const response = await fetch('https://oauth2.googleapis.com/token', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+			},
+			body: new URLSearchParams({
+				client_id: this.settings.googleDriveClientId,
+				client_secret: this.settings.googleDriveClientSecret,
+				refresh_token: this.settings.refreshToken,
+				grant_type: 'refresh_token'
+			})
+		});
+
+		if (!response.ok) {
+			throw new Error(`Failed to refresh token: ${response.status}`);
+		}
+
+		const tokens = await response.json();
+		this.accessToken = tokens.access_token;
+	}
+
+	async driveApiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
+		if (!this.accessToken) {
+			await this.refreshAccessToken();
+		}
+
+		const response = await fetch(`https://www.googleapis.com/drive/v3/${endpoint}`, {
+			...options,
+			headers: {
+				'Authorization': `Bearer ${this.accessToken}`,
+				'Content-Type': 'application/json',
+				...options.headers
+			}
+		});
+
+		if (response.status === 401) {
+			// Token expired, refresh and retry
+			await this.refreshAccessToken();
+			return this.driveApiRequest(endpoint, options);
+		}
+
+		if (!response.ok) {
+			throw new Error(`Drive API error: ${response.status}`);
+		}
+
+		return response.json();
+	}
+
 	async syncVault(): Promise<void> {
-		if (!this.drive) {
+		if (!this.accessToken) {
 			new Notice('Please authenticate with Google Drive first.');
 			return;
 		}
@@ -192,29 +256,39 @@ export default class ObsidianDrivePlugin extends Plugin {
 				listOptions.spaces = searchSpace;
 			}
 
-			const response = await this.drive.files.list(listOptions);
+			const queryParams = new URLSearchParams({
+				q: listOptions.q
+			});
+			if (listOptions.spaces) {
+				queryParams.append('spaces', listOptions.spaces);
+			}
+			const response = await this.driveApiRequest(`files?${queryParams}`);
 
-			if (response.data.files && response.data.files.length > 0) {
+			if (response.files && response.files.length > 0) {
 				// Update existing file
-				const fileId = response.data.files[0].id;
-				await this.drive.files.update({
-					fileId: fileId,
-					media: {
-						mimeType: 'text/plain',
-						body: content
-					}
+				const fileId = response.files[0].id;
+				await this.driveApiRequest(`files/${fileId}`, {
+					method: 'PATCH',
+					headers: {
+						'Content-Type': 'text/plain'
+					},
+					body: content
 				});
 			} else {
 				// Create new file
-				await this.drive.files.create({
-					requestBody: {
-						name: fileName,
-						parents: this.getParentId()
-					},
-					media: {
-						mimeType: 'text/plain',
-						body: content
-					}
+				const metadata = {
+					name: fileName,
+					parents: this.getParentId()
+				};
+				
+				const form = new FormData();
+				form.append('metadata', new Blob([JSON.stringify(metadata)], {type: 'application/json'}));
+				form.append('file', new Blob([content], {type: 'text/plain'}));
+				
+				await this.driveApiRequest('files?uploadType=multipart', {
+					method: 'POST',
+					headers: {},
+					body: form
 				});
 			}
 		} catch (error) {
@@ -224,17 +298,17 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 	startAutoSync(): void {
 		if (this.syncInterval) {
-			clearInterval(this.syncInterval);
+			window.clearInterval(this.syncInterval);
 		}
 
-		this.syncInterval = setInterval(async () => {
+		this.syncInterval = window.setInterval(async () => {
 			await this.syncVault();
 		}, this.settings.syncInterval);
 	}
 
 	stopAutoSync(): void {
 		if (this.syncInterval) {
-			clearInterval(this.syncInterval);
+			window.clearInterval(this.syncInterval);
 			this.syncInterval = null;
 		}
 	}
@@ -246,21 +320,23 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 		try {
 			// Check if folder already exists
-			const response = await this.drive.files.list({
-				q: `name='${this.settings.visibleFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+			const queryParams = new URLSearchParams({
+				q: `name='${this.settings.visibleFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
 			});
+			const response = await this.driveApiRequest(`files?${queryParams}`);
 
-			if (response.data.files && response.data.files.length > 0) {
-				this.visibleFolderId = response.data.files[0].id;
+			if (response.files && response.files.length > 0) {
+				this.visibleFolderId = response.files[0].id;
 			} else {
 				// Create the folder
-				const folderResponse = await this.drive.files.create({
-					requestBody: {
+				const folderResponse = await this.driveApiRequest('files', {
+					method: 'POST',
+					body: JSON.stringify({
 						name: this.settings.visibleFolderName,
 						mimeType: 'application/vnd.google-apps.folder'
-					}
+					})
 				});
-				this.visibleFolderId = folderResponse.data.id;
+				this.visibleFolderId = folderResponse.id;
 			}
 		} catch (error) {
 			console.error('Error ensuring visible folder exists:', error);
@@ -313,7 +389,7 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.googleDriveClientId = value;
 					await this.plugin.saveSettings();
-					this.plugin.initializeGoogleDrive();
+					await this.plugin.initializeGoogleDrive();
 				}));
 
 		new Setting(containerEl)
@@ -325,7 +401,7 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.googleDriveClientSecret = value;
 					await this.plugin.saveSettings();
-					this.plugin.initializeGoogleDrive();
+					await this.plugin.initializeGoogleDrive();
 				}));
 
 		new Setting(containerEl)
