@@ -181,12 +181,12 @@ export default class ObsidianDrivePlugin extends Plugin {
 		this.accessToken = tokens.access_token;
 	}
 
-	async driveApiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
+	async getDriveFile(fileId: string, options: RequestInit={}): Promise<any> {
 		if (!this.accessToken) {
 			await this.refreshAccessToken();
 		}
 
-		const response = await fetch(`https://www.googleapis.com/drive/v3/${endpoint}`, {
+		const response = await fetch(`https://www.googleapis.com/drive/v3/${fileId}`, {
 			...options,
 			headers: {
 				'Authorization': `Bearer ${this.accessToken}`,
@@ -198,7 +198,34 @@ export default class ObsidianDrivePlugin extends Plugin {
 		if (response.status === 401) {
 			// Token expired, refresh and retry
 			await this.refreshAccessToken();
-			return this.driveApiRequest(endpoint, options);
+			return this.driveApiRequest(fileId, options);
+		}
+
+		if (!response.ok) {
+			throw new Error(`Drive API error: ${response.status}`);
+		}
+
+		return response.json();
+	}
+
+	async driveApiRequest(fileId: string, options: RequestInit = {}): Promise<any> {
+		if (!this.accessToken) {
+			await this.refreshAccessToken();
+		}
+
+		const response = await fetch(`https://www.googleapis.com/upload/drive/v3/${fileId}`, {
+			...options,
+			headers: {
+				'Authorization': `Bearer ${this.accessToken}`,
+				'Content-Type': 'application/json',
+				...options.headers
+			}
+		});
+
+		if (response.status === 401) {
+			// Token expired, refresh and retry
+			await this.refreshAccessToken();
+			return this.driveApiRequest(fileId, options);
 		}
 
 		if (!response.ok) {
@@ -250,7 +277,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 			const listOptions: any = {
 				q: this.getSearchQuery(fileName)
 			};
-			
+
 			const searchSpace = this.getSearchSpace();
 			if (searchSpace) {
 				listOptions.spaces = searchSpace;
@@ -262,7 +289,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 			if (listOptions.spaces) {
 				queryParams.append('spaces', listOptions.spaces);
 			}
-			const response = await this.driveApiRequest(`files?${queryParams}`);
+			const response = await this.getDriveFile(`files?${queryParams}`);
 
 			if (response.files && response.files.length > 0) {
 				// Update existing file
@@ -280,11 +307,11 @@ export default class ObsidianDrivePlugin extends Plugin {
 					name: fileName,
 					parents: this.getParentId()
 				};
-				
+
 				const form = new FormData();
 				form.append('metadata', new Blob([JSON.stringify(metadata)], {type: 'application/json'}));
 				form.append('file', new Blob([content], {type: 'text/plain'}));
-				
+
 				await this.driveApiRequest('files?uploadType=multipart', {
 					method: 'POST',
 					headers: {},
@@ -323,7 +350,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 			const queryParams = new URLSearchParams({
 				q: `name='${this.settings.visibleFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
 			});
-			const response = await this.driveApiRequest(`files?${queryParams}`);
+			const response = await this.getDriveFile(`files?${queryParams}`);
 
 			if (response.files && response.files.length > 0) {
 				this.visibleFolderId = response.files[0].id;
@@ -459,7 +486,7 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.manualSync = value;
 					await this.plugin.saveSettings();
-					
+
 					// Restart plugin to register/unregister ribbon button and command
 					new Notice('Please restart Obsidian to apply manual sync setting.');
 				}));
@@ -472,7 +499,7 @@ class ObsidianDriveSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.syncOnSave = value;
 					await this.plugin.saveSettings();
-					
+
 					// Restart plugin to register/unregister event listener
 					new Notice('Please restart Obsidian to apply sync on save setting.');
 				}));
