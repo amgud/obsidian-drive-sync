@@ -98,9 +98,16 @@ export default class ObsidianDrivePlugin extends Plugin {
 			this.startAutoSync();
 		}
 
-		// Sync on startup if enabled
+		// Sync on startup if enabled - delay until vault is fully loaded
 		if (this.settings.syncOnStartup && this.accessToken) {
-			await this.syncVault();
+			// Wait for the workspace to be ready and files to be loaded
+			this.app.workspace.onLayoutReady(() => {
+				// Add a small delay to ensure all files are loaded
+				setTimeout(async () => {
+					console.log('Vault loaded, starting sync. Files:', this.app.vault.getFiles().length);
+					await this.syncVault();
+				}, 1000);
+			});
 		}
 	}
 
@@ -373,27 +380,30 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 			const content = await response.text();
 
+			// Normalize the file path - ensure it uses forward slashes and doesn't start with a slash
+			const normalizedPath = fileName.replace(/\\/g, '/').replace(/^\/+/, '');
+			console.log(`Original fileName: "${fileName}"`);
+			console.log(`Normalized path: "${normalizedPath}"`);
+
 			// Check if file already exists
-			const existingFile = this.app.vault.getAbstractFileByPath(fileName);
-			let targetFile: TFile;
+			const existingFile = this.app.vault.getAbstractFileByPath(normalizedPath);
+			console.log(`Existing file:`, existingFile);
+			console.log(`Is TFile:`, existingFile instanceof TFile);
 
 			if (existingFile && existingFile instanceof TFile) {
 				// Update existing file
 				await this.app.vault.modify(existingFile, content);
-				targetFile = existingFile;
-				console.log(`Updated existing file: ${fileName}`);
-				new Notice(`Updated: ${fileName}`, 3000);
+				console.log(`Updated existing file: ${normalizedPath}`);
+				new Notice(`Updated: ${normalizedPath}`, 3000);
 			} else {
 				// Create new file
-				targetFile = await this.app.vault.create(fileName, content);
-				console.log(`Downloaded new file: ${fileName}`);
-				new Notice(`Downloaded: ${fileName}`, 3000);
+				await this.app.vault.create(normalizedPath, content);
+				console.log(`Downloaded new file: ${normalizedPath}`);
+				new Notice(`Downloaded: ${normalizedPath}`, 3000);
 			}
 
-			// Try to refresh the vault to ensure file appears in UI
-			if (this.app.workspace) {
-				this.app.workspace.trigger('file-menu', targetFile);
-			}
+			// The file should automatically appear in the UI after creation/modification
+			// No manual refresh needed as Obsidian handles this automatically
 		} catch (error) {
 			console.error(`Error downloading file ${fileName}:`, error);
 			new Notice(`Failed to download ${fileName}: ${error.message}`, 5000);
