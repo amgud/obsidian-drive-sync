@@ -337,7 +337,8 @@ export default class ObsidianDrivePlugin extends Plugin {
 			}
 
 			const response = await this.getDriveFile(`files?${queryParams}`);
-
+			
+			let downloadedCount = 0;
 			if (response.files && response.files.length > 0) {
 				for (const driveFile of response.files) {
 					const fileName = driveFile.name;
@@ -347,11 +348,17 @@ export default class ObsidianDrivePlugin extends Plugin {
 					if (!existingFile) {
 						// Download the file from Google Drive
 						await this.downloadFile(driveFile.id, fileName);
+						downloadedCount++;
 					}
 				}
 			}
+			
+			if (downloadedCount > 0) {
+				new Notice(`Downloaded ${downloadedCount} file(s) from Google Drive`);
+			}
 		} catch (error) {
 			console.error('Error downloading missing files:', error);
+			new Notice('Error downloading files from Google Drive. Check console for details.');
 		}
 	}
 
@@ -371,10 +378,19 @@ export default class ObsidianDrivePlugin extends Plugin {
 			const content = await response.text();
 			
 			// Create the file in Obsidian vault
-			await this.app.vault.create(fileName, content);
+			const createdFile = await this.app.vault.create(fileName, content);
 			console.log(`Downloaded file: ${fileName}`);
+			
+			// Show notification for the downloaded file
+			new Notice(`Downloaded: ${fileName}`, 3000);
+			
+			// Try to refresh the vault to ensure file appears in UI
+			if (this.app.workspace) {
+				this.app.workspace.trigger('file-menu', createdFile);
+			}
 		} catch (error) {
 			console.error(`Error downloading file ${fileName}:`, error);
+			new Notice(`Failed to download ${fileName}: ${error.message}`, 5000);
 		}
 	}
 
