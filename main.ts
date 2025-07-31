@@ -31,6 +31,9 @@ export default class ObsidianDrivePlugin extends Plugin {
 	accessToken: string | null = null;
 	syncInterval: number | null = null;
 	visibleFolderId: string | null = null;
+	isSyncing: boolean = false;
+	syncStatusBar: HTMLElement | null = null;
+	syncRibbonIcon: HTMLElement | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -40,7 +43,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 
 		// Add ribbon icon and command if manual sync is enabled
 		if (this.settings.manualSync) {
-			this.addRibbonIcon('cloud', 'Sync with Google Drive', async () => {
+			this.syncRibbonIcon = this.addRibbonIcon('cloud', 'Sync with Google Drive', async () => {
 				await this.syncVault();
 			});
 
@@ -68,7 +71,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 		if (this.settings.syncOnSave) {
 			this.registerEvent(
 				this.app.vault.on('modify', async (file) => {
-					if (file instanceof TFile && this.accessToken) {
+					if (file instanceof TFile && this.accessToken && !this.isSyncing) {
 						await this.syncFile(file);
 					}
 				})
@@ -77,7 +80,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 			// Handle file renames
 			this.registerEvent(
 				this.app.vault.on('rename', async (file, oldPath) => {
-					if (file instanceof TFile && this.accessToken) {
+					if (file instanceof TFile && this.accessToken && !this.isSyncing) {
 						await this.handleFileRename(file, oldPath);
 					}
 				})
@@ -86,7 +89,7 @@ export default class ObsidianDrivePlugin extends Plugin {
 			// Handle file deletions
 			this.registerEvent(
 				this.app.vault.on('delete', async (file) => {
-					if (file instanceof TFile && this.accessToken) {
+					if (file instanceof TFile && this.accessToken && !this.isSyncing) {
 						await this.handleFileDelete(file);
 					}
 				})
@@ -98,17 +101,19 @@ export default class ObsidianDrivePlugin extends Plugin {
 			this.startAutoSync();
 		}
 
-		// Sync on startup if enabled - delay until vault is fully loaded
+		// Sync on startup if enabled - wait for vault to be ready
 		if (this.settings.syncOnStartup && this.accessToken) {
-			// Wait for the workspace to be ready and files to be loaded
-			this.app.workspace.onLayoutReady(() => {
-				// Add a small delay to ensure all files are loaded
-				setTimeout(async () => {
-					console.log('Vault loaded, starting sync. Files:', this.app.vault.getFiles().length);
-					await this.syncVault();
-				}, 1000);
+			this.app.workspace.onLayoutReady(async () => {
+				// Wait for vault operations to settle
+				await this.waitForVaultReady();
+				console.log('Vault loaded, starting sync. Files:', this.app.vault.getFiles().length);
+				await this.syncVault();
 			});
 		}
+
+		// Add status bar item
+		this.syncStatusBar = this.addStatusBarItem();
+		this.updateSyncStatus('Ready');
 	}
 
 	onunload() {
@@ -307,27 +312,41 @@ export default class ObsidianDrivePlugin extends Plugin {
 			return;
 		}
 
+		if (this.isSyncing) {
+			new Notice('Sync already in progress...');
+			return;
+		}
+
 		try {
+			this.isSyncing = true;
+			this.updateSyncStatus('Syncing...');
 			new Notice('Starting vault sync...');
 
 			// Ensure visible folder exists if using visible storage
 			if (this.settings.storageLocation === 'visible') {
+				this.updateSyncStatus('Setting up folder...');
 				await this.ensureVisibleFolderExists();
 			}
 
 			// First, download files from Google Drive that don't exist locally
+			this.updateSyncStatus('Downloading files...');
 			await this.downloadMissingFiles();
 
 			// Then, upload/update local files to Google Drive
 			const files = this.app.vault.getFiles();
-			for (const file of files) {
-				await this.syncFile(file);
+			for (let i = 0; i < files.length; i++) {
+				this.updateSyncStatus(`Uploading (${i + 1}/${files.length})...`);
+				await this.syncFile(files[i]);
 			}
 
+			this.updateSyncStatus('Ready');
 			new Notice('Vault sync completed!');
 		} catch (error) {
 			console.error('Sync error:', error);
+			this.updateSyncStatus('Error');
 			new Notice('Sync failed. Check console for details.');
+		} finally {
+			this.isSyncing = false;
 		}
 	}
 
@@ -617,6 +636,22 @@ export default class ObsidianDrivePlugin extends Plugin {
 			return undefined;
 		}
 		return 'appDataFolder';
+	}
+
+	async waitForVaultReady(): Promise<void> {
+		// Simple check - if we can get files, vault is ready
+		try {
+			this.app.vault.getFiles();
+		} catch (error) {
+			// If vault not ready, just continue anyway
+			console.log('Vault not immediately ready, proceeding with sync');
+		}
+	}
+
+	updateSyncStatus(status: string): void {
+		if (this.syncStatusBar) {
+			this.syncStatusBar.setText(`Drive: ${status}`);
+		}
 	}
 }
 
